@@ -25,8 +25,8 @@ USER appuser
 
 EXPOSE 8000
 
-# App Runner sets PORT. Start with 2 workers on a single scaled instance.
-# Keep App Runner max instances = 1 until PDF jobs are moved to shared storage
-# (in-memory job queue is per-process/instance).
+# App Runner sets PORT. Prefer horizontal scale via ECS tasks.
+# Keep max-task-count modest until PDF jobs use shared storage.
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2 --proxy-headers --timeout-keep-alive 65"]
+
 

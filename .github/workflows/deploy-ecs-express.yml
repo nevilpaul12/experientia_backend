@@ -1,0 +1,128 @@
+name: Deploy API to ECS Express Mode
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+  AWS_ACCOUNT_ID: "746859878367"
+  ECR_REPOSITORY: experientia-api
+  ECS_CLUSTER: experientia
+  ECS_SERVICE: experientia-api
+  CONTAINER_PORT: "8000"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" -t "$ECR_REGISTRY/$ECR_REPOSITORY:latest" .
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+          echo "IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_ENV"
+
+      - name: Build container environment JSON
+        id: envjson
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          MANAGER_OTP: ${{ secrets.MANAGER_OTP }}
+          EXECUTOR_OTP: ${{ secrets.EXECUTOR_OTP }}
+          AWS_ACCESS_KEY_ID_APP: ${{ secrets.APP_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY_APP: ${{ secrets.APP_AWS_SECRET_ACCESS_KEY }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          PUBLIC_BASE_URL: ${{ secrets.PUBLIC_BASE_URL }}
+          CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
+        run: |
+          python3 <<'PY'
+          import json, os
+          required = [
+              "DATABASE_URL", "SECRET_KEY", "MANAGER_OTP", "EXECUTOR_OTP",
+              "AWS_ACCESS_KEY_ID_APP", "AWS_SECRET_ACCESS_KEY_APP", "S3_BUCKET",
+          ]
+          missing = [k for k in required if not os.environ.get(k)]
+          if missing:
+              raise SystemExit(f"Missing GitHub secrets: {', '.join(missing)}")
+
+          pairs = [
+              ("DATABASE_URL", os.environ["DATABASE_URL"]),
+              ("SECRET_KEY", os.environ["SECRET_KEY"]),
+              ("MANAGER_OTP", os.environ["MANAGER_OTP"]),
+              ("EXECUTOR_OTP", os.environ["EXECUTOR_OTP"]),
+              ("AWS_ACCESS_KEY_ID", os.environ["AWS_ACCESS_KEY_ID_APP"]),
+              ("AWS_SECRET_ACCESS_KEY", os.environ["AWS_SECRET_ACCESS_KEY_APP"]),
+              ("AWS_REGION", "ap-south-1"),
+              ("S3_BUCKET", os.environ["S3_BUCKET"]),
+              ("S3_BROWSER_UPLOAD", "false"),
+              ("CREATE_TABLES", "false"),
+              ("SEED_DEMO", "false"),
+              ("DB_POOL_SIZE", "10"),
+              ("DB_MAX_OVERFLOW", "20"),
+          ]
+          if os.environ.get("PUBLIC_BASE_URL"):
+              pairs.append(("PUBLIC_BASE_URL", os.environ["PUBLIC_BASE_URL"]))
+          if os.environ.get("CORS_ORIGINS"):
+              pairs.append(("CORS_ORIGINS", os.environ["CORS_ORIGINS"]))
+
+          payload = [{"name": k, "value": v} for k, v in pairs]
+          path = os.environ["GITHUB_OUTPUT"]
+          # Multiline output for the action input
+          with open(path, "a", encoding="utf-8") as fh:
+              fh.write("environment-variables<<EOF\n")
+              fh.write(json.dumps(payload))
+              fh.write("\nEOF\n")
+          print(f"Prepared {len(payload)} environment variables")
+          PY
+
+      - name: Deploy to ECS Express Mode
+        id: deploy
+        uses: aws-actions/amazon-ecs-deploy-express-service@v1
+        with:
+          service-name: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          image: ${{ env.IMAGE_URI }}
+          execution-role-arn: arn:aws:iam::746859878367:role/ecsTaskExecutionRole
+          infrastructure-role-arn: arn:aws:iam::746859878367:role/ecsInfrastructureRoleForExpressServices
+          container-port: ${{ env.CONTAINER_PORT }}
+          health-check-path: /api/health
+          cpu: "2048"
+          memory: "4096"
+          min-task-count: "1"
+          max-task-count: "2"
+          auto-scaling-metric: AVERAGE_CPU
+          auto-scaling-target-value: "70"
+          environment-variables: ${{ steps.envjson.outputs.environment-variables }}
+          tags: |
+            [
+              {"key": "Project", "value": "Experientia"},
+              {"key": "Service", "value": "api"}
+            ]
+
+      - name: Print service endpoint
+        run: |
+          echo "Service ARN: ${{ steps.deploy.outputs.service-arn }}"
+          echo "Endpoint: ${{ steps.deploy.outputs.endpoint }}"
+          echo "After first deploy, set GitHub secrets PUBLIC_BASE_URL and CORS_ORIGINS, then re-run this workflow."
