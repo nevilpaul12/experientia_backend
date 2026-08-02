@@ -14,9 +14,11 @@ settings = get_settings()
 
 app = FastAPI(title=settings.app_name, version="2.0.0")
 
+# Allow explicit origins from env, plus any CloudFront default URL used in prod.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
+    allow_origin_regex=r"https://[a-z0-9.-]+\.cloudfront\.net",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
