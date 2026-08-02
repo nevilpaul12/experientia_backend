@@ -25,8 +25,9 @@ USER appuser
 
 EXPOSE 8000
 
-# App Runner sets PORT. Prefer horizontal scale via ECS tasks.
-# Keep max-task-count modest until PDF jobs use shared storage.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2 --proxy-headers --timeout-keep-alive 65"]
+# Single worker: PDF export jobs are in-process memory and must stay sticky.
+# Scale horizontally via ECS tasks only after jobs move to shared storage.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --proxy-headers --timeout-keep-alive 65"]
+
 
 
