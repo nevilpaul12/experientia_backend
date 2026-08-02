@@ -5,6 +5,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Prevent overlapping Express Mode updates (causes ALB dual-target-group rollbacks).
+concurrency:
+  group: ecs-express-experientia-api
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -89,7 +94,6 @@ jobs:
 
           payload = [{"name": k, "value": v} for k, v in pairs]
           path = os.environ["GITHUB_OUTPUT"]
-          # Multiline output for the action input
           with open(path, "a", encoding="utf-8") as fh:
               fh.write("environment-variables<<EOF\n")
               fh.write(json.dumps(payload))
@@ -125,4 +129,4 @@ jobs:
         run: |
           echo "Service ARN: ${{ steps.deploy.outputs.service-arn }}"
           echo "Endpoint: ${{ steps.deploy.outputs.endpoint }}"
-          echo "After first deploy, set GitHub secrets PUBLIC_BASE_URL and CORS_ORIGINS, then re-run this workflow."
+          echo "If the endpoint URL changes, rebuild the frontend with the new VITE_API_URL."
