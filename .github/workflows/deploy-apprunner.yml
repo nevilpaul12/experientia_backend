@@ -1,0 +1,53 @@
+name: Deploy API to App Runner
+
+# Connect this workflow after the App Runner service exists and
+# GitHub secrets below are set. First deploy can also be done in the AWS console.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ap-south-1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" .
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          echo "IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_ENV"
+
+      - name: Deploy to App Runner
+        env:
+          SERVICE_ARN: ${{ secrets.APP_RUNNER_SERVICE_ARN }}
+        run: |
+          aws apprunner start-deployment --service-arn "$SERVICE_ARN"
+          # If the service tracks the :latest tag, also tag and push latest:
+          # docker tag "$IMAGE_URI" "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+          # docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+          echo "Triggered App Runner deployment for $SERVICE_ARN"
