@@ -149,12 +149,25 @@ class StorageService:
             return key_or_url
 
     def viewable_url(self, url: str | None, key: str | None = None) -> str:
-        """Browser-safe relative URL proxied through our API (private bucket)."""
+        """Browser-safe URL proxied through our API (private bucket).
+
+        Always absolute when PUBLIC_BASE_URL is set so a CloudFront-hosted
+        frontend can load images from the API origin.
+        """
         derived = key or self.key_from_url(url or "")
         if derived and settings.use_s3:
             from urllib.parse import quote
 
-            return f"/api/uploads/view?key={quote(derived, safe='')}"
+            path = f"/api/uploads/view?key={quote(derived, safe='')}"
+            base = (settings.public_base_url or "").rstrip("/")
+            if base:
+                return f"{base}{path}"
+            return path
+        # Absolute S3 URL fallback — prefer API proxy when possible
+        if url and url.startswith("http") and settings.use_s3:
+            derived = self.key_from_url(url)
+            if derived:
+                return self.viewable_url(None, derived)
         return url or ""
 
 

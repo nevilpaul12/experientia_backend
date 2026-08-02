@@ -43,6 +43,9 @@ def view_object(key: str = Query(..., min_length=3)):
         headers={
             "Cache-Control": "private, max-age=300",
             "Content-Disposition": "inline",
+            # Allow <img> loads from the CloudFront frontend origin.
+            "Access-Control-Allow-Origin": "*",
+            "Cross-Origin-Resource-Policy": "cross-origin",
         },
     )
 
