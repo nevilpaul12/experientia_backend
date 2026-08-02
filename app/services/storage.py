@@ -151,24 +151,37 @@ class StorageService:
     def viewable_url(self, url: str | None, key: str | None = None) -> str:
         """Browser-safe URL proxied through our API (private bucket).
 
-        Always absolute when PUBLIC_BASE_URL is set so a CloudFront-hosted
-        frontend can load images from the API origin.
+        Returns an absolute API URL when PUBLIC_BASE_URL is set so a
+        CloudFront-hosted frontend does not request /api/* from itself
+        (which would receive index.html via SPA fallback).
         """
-        derived = key or self.key_from_url(url or "")
-        if derived and settings.use_s3:
-            from urllib.parse import quote
+        import os
+        from urllib.parse import quote, unquote, urlparse, parse_qs
 
+        from app.config import get_settings
+
+        cfg = get_settings()
+        raw = url or ""
+        derived = key
+
+        if not derived and raw.startswith("/api/uploads/view"):
+            qs = parse_qs(urlparse(raw).query)
+            derived = unquote((qs.get("key") or [""])[0] or "")
+        if not derived:
+            derived = self.key_from_url(raw)
+
+        if derived and cfg.use_s3:
             path = f"/api/uploads/view?key={quote(derived, safe='')}"
-            base = (settings.public_base_url or "").rstrip("/")
+            base = (os.environ.get("PUBLIC_BASE_URL") or cfg.public_base_url or "").rstrip("/")
             if base:
                 return f"{base}{path}"
             return path
-        # Absolute S3 URL fallback — prefer API proxy when possible
-        if url and url.startswith("http") and settings.use_s3:
-            derived = self.key_from_url(url)
-            if derived:
-                return self.viewable_url(None, derived)
-        return url or ""
+
+        if raw.startswith("http") and cfg.use_s3:
+            again = self.key_from_url(raw)
+            if again:
+                return self.viewable_url(None, again)
+        return raw
 
 
     def ensure_bucket_cors(self) -> None:
