@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import case, func
 from sqlalchemy.orm import joinedload
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.auth import CurrentUser, ManagerUser, DbSession, user_is_manager, user_is_supervisor, can_view_campaign
 from app.models import Task, Campaign, User, TaskStatus
@@ -124,6 +125,7 @@ def _meta(task: Task) -> dict:
 
 def _set_meta(task: Task, meta: dict) -> None:
     task.metadata_ = meta
+    flag_modified(task, "metadata_")
     task.updatedAt = datetime.utcnow()
 
 
