@@ -257,6 +257,11 @@ class CampaignOut(CampaignListItem):
     tasks_total: int = 0
 
 
+class CampaignAddTasksResponse(BaseModel):
+    campaign: CampaignOut
+    task_ids: list[UUID]
+
+
 class PresignRequest(BaseModel):
     filename: str
     content_type: str = "image/jpeg"

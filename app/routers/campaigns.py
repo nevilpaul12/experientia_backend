@@ -33,6 +33,7 @@ from app.schemas import (
     CampaignCreate,
     CampaignUpdate,
     CampaignAddTasks,
+    CampaignAddTasksResponse,
     CampaignOut,
     CampaignListItem,
     CampaignAssignExecutors,
@@ -348,7 +349,7 @@ def _add_campaign_tasks(
     count: int,
     executor_user_id: UUID | None,
     assigned_by: UUID,
-) -> None:
+) -> list[UUID]:
     executors = _campaign_executor_users(db, campaign.id)
     if not executors:
         raise HTTPException(
@@ -379,12 +380,15 @@ def _add_campaign_tasks(
         seed=seed,
     )
     now = datetime.utcnow()
+    created_ids: list[UUID] = []
     for i, (lat, lng) in enumerate(points, start=1):
         seq = start_seq + i
         ex = assign_pool[(seq - 1) % len(assign_pool)]
+        task_id = uuid4()
+        created_ids.append(task_id)
         db.add(
             Task(
-                id=uuid4(),
+                id=task_id,
                 campaignId=campaign.id,
                 executorUserId=ex.id,
                 status=TaskStatus.PENDING,
@@ -400,6 +404,7 @@ def _add_campaign_tasks(
 
     campaign.totalTasks = int(campaign.totalTasks or 0) + count
     campaign.updatedAt = datetime.utcnow()
+    return created_ids
 
 
 @router.get("/{campaign_id}", response_model=CampaignOut)
@@ -564,7 +569,7 @@ def delete_campaign(campaign_id: UUID, db: DbSession, user: ManagerUser):
     return {"ok": True, "id": str(campaign_id)}
 
 
-@router.post("/{campaign_id}/tasks", response_model=CampaignOut)
+@router.post("/{campaign_id}/tasks", response_model=CampaignAddTasksResponse)
 def add_campaign_tasks(
     campaign_id: UUID,
     payload: CampaignAddTasks,
@@ -574,9 +579,12 @@ def add_campaign_tasks(
     campaign = _load_campaign_base(db, campaign_id)
     if not campaign or campaign.organizationId != user.organizationId:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    _add_campaign_tasks(db, campaign, payload.count, payload.executor_user_id, user.id)
+    task_ids = _add_campaign_tasks(db, campaign, payload.count, payload.executor_user_id, user.id)
     db.commit()
-    return _get_campaign_detail(campaign_id, db, user)
+    return CampaignAddTasksResponse(
+        campaign=_get_campaign_detail(campaign_id, db, user),
+        task_ids=task_ids,
+    )
 
 
 @router.post("/{campaign_id}/executors", response_model=CampaignOut)
