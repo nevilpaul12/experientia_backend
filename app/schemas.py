@@ -201,6 +201,7 @@ class CampaignUpdate(BaseModel):
 class CampaignAddTasks(BaseModel):
     count: int = Field(default=1, ge=1, le=500)
     executor_user_id: UUID | None = None
+    manager_owned: bool = False
 
 
 class CampaignAssignExecutors(BaseModel):
@@ -250,6 +251,7 @@ class CampaignOut(CampaignListItem):
     organization_id: UUID
     tasks: list[TaskOut] = []
     executors: list[UserOut] = []
+    task_assignees: list[UserOut] = []
     members: list[MemberOut] = []
     # pagination for tasks
     tasks_page: int = 1

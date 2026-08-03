@@ -259,6 +259,7 @@ def campaign_out(
     page_size: int = 24,
     tasks_total: int | None = None,
     image_limit: int | None = 1,
+    task_assignees: list[User] | None = None,
 ) -> CampaignOut:
     all_tasks = c.tasks or []
     if task_count is None:
@@ -291,6 +292,7 @@ def campaign_out(
     members = []
     seen = set()
     name_by_id: dict = {}
+    executor_ids: set = set()
     for m in c.members or []:
         if m.user:
             name_by_id[m.userId] = f"{m.user.firstName} {m.user.lastName}".strip()
@@ -300,8 +302,19 @@ def campaign_out(
         members.append(member_out(m, assigner_name=name_by_id.get(m.assignedBy)))
         if m.role == CampaignRole.EXECUTOR and m.userId not in seen:
             seen.add(m.userId)
+            executor_ids.add(m.userId)
             if m.user:
                 executors.append(user_out(m.user, role="executor"))
+
+    assignee_users = task_assignees if task_assignees is not None else []
+    assignee_dtos = []
+    assignee_seen: set = set()
+    for u in assignee_users:
+        if u.id in assignee_seen:
+            continue
+        assignee_seen.add(u.id)
+        role = "executor" if u.id in executor_ids else "manager"
+        assignee_dtos.append(user_out(u, role=role))
 
     return CampaignOut(
         **base.model_dump(),
@@ -310,6 +323,7 @@ def campaign_out(
         organization_id=c.organizationId,
         tasks=task_dtos,
         executors=executors,
+        task_assignees=assignee_dtos,
         members=members,
         tasks_page=page,
         tasks_page_size=page_size,

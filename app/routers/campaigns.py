@@ -343,27 +343,45 @@ def _max_task_sequence(db, campaign_id: UUID) -> int:
     return max_seq
 
 
+def _campaign_task_assignees(db, campaign_id: UUID) -> list[User]:
+    return (
+        db.query(User)
+        .join(Task, Task.executorUserId == User.id)
+        .filter(Task.campaignId == campaign_id)
+        .distinct()
+        .order_by(User.firstName, User.lastName)
+        .all()
+    )
+
+
 def _add_campaign_tasks(
     db,
     campaign: Campaign,
     count: int,
     executor_user_id: UUID | None,
     assigned_by: UUID,
+    manager_owned: bool = False,
 ) -> list[UUID]:
-    executors = _campaign_executor_users(db, campaign.id)
-    if not executors:
-        raise HTTPException(
-            status_code=400,
-            detail="Assign at least one executor to this campaign before adding tasks",
-        )
-
-    if executor_user_id:
-        executor = next((e for e in executors if e.id == executor_user_id), None)
-        if not executor:
-            raise HTTPException(status_code=400, detail="Executor is not assigned to this campaign")
-        assign_pool = [executor]
+    if manager_owned:
+        manager = db.get(User, assigned_by)
+        if not manager:
+            raise HTTPException(status_code=400, detail="Manager account not found")
+        assign_pool = [manager]
     else:
-        assign_pool = executors
+        executors = _campaign_executor_users(db, campaign.id)
+        if not executors:
+            raise HTTPException(
+                status_code=400,
+                detail="Assign at least one executor to this campaign before adding tasks",
+            )
+
+        if executor_user_id:
+            executor = next((e for e in executors if e.id == executor_user_id), None)
+            if not executor:
+                raise HTTPException(status_code=400, detail="Executor is not assigned to this campaign")
+            assign_pool = [executor]
+        else:
+            assign_pool = executors
 
     if campaign.latitude is None or campaign.longitude is None:
         raise HTTPException(status_code=400, detail="Campaign needs center coordinates")
@@ -386,6 +404,14 @@ def _add_campaign_tasks(
         ex = assign_pool[(seq - 1) % len(assign_pool)]
         task_id = uuid4()
         created_ids.append(task_id)
+        meta: dict = {
+            "sequenceNumber": seq,
+            "target": {"latitude": lat, "longitude": lng},
+            "images": [],
+        }
+        if manager_owned:
+            meta["managerOwned"] = True
+
         db.add(
             Task(
                 id=task_id,
@@ -393,11 +419,7 @@ def _add_campaign_tasks(
                 executorUserId=ex.id,
                 status=TaskStatus.PENDING,
                 assignedAt=now,
-                metadata_={
-                    "sequenceNumber": seq,
-                    "target": {"latitude": lat, "longitude": lng},
-                    "images": [],
-                },
+                metadata_=meta,
                 flagged=False,
             )
         )
@@ -490,6 +512,8 @@ def _get_campaign_detail(
     for t in page_tasks:
         t.campaign = campaign
 
+    assignees = _campaign_task_assignees(db, campaign_id)
+
     return campaign_out(
         campaign,
         tasks=page_tasks,
@@ -500,6 +524,7 @@ def _get_campaign_detail(
         page_size=limit,
         tasks_total=tasks_total,
         image_limit=1,
+        task_assignees=assignees,
     )
 
 
@@ -579,7 +604,14 @@ def add_campaign_tasks(
     campaign = _load_campaign_base(db, campaign_id)
     if not campaign or campaign.organizationId != user.organizationId:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    task_ids = _add_campaign_tasks(db, campaign, payload.count, payload.executor_user_id, user.id)
+    task_ids = _add_campaign_tasks(
+        db,
+        campaign,
+        payload.count,
+        payload.executor_user_id,
+        user.id,
+        manager_owned=payload.manager_owned,
+    )
     db.commit()
     return CampaignAddTasksResponse(
         campaign=_get_campaign_detail(campaign_id, db, user),
