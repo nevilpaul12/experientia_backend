@@ -45,6 +45,8 @@ from app.services.pdf_jobs import start_export_job, get_job, list_campaign_jobs
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 
+_UNSET = object()
+
 
 def _load_campaign_base(db, campaign_id: UUID) -> Campaign | None:
     return (
@@ -418,8 +420,15 @@ def update_campaign(
     if not campaign or campaign.organizationId != user.organizationId:
         raise HTTPException(status_code=404, detail="Campaign not found")
     data = payload.model_dump(exclude_unset=True)
-    brand_id = data.pop("brand_id", None)
-    if brand_id is not None:
+    brand_id = data.pop("brand_id", _UNSET)
+
+    if "start_date" in data or "end_date" in data:
+        start = data.get("start_date", campaign.startDate)
+        end = data.get("end_date", campaign.endDate)
+        if start and end and end < start:
+            raise HTTPException(status_code=400, detail="End date must be on or after start date")
+
+    if brand_id is not _UNSET:
         if brand_id:
             brand = (
                 db.query(Brand)
@@ -432,14 +441,40 @@ def update_campaign(
             campaign.logo = brand.image
         else:
             campaign.brandId = None
-    for field, value in data.items():
-        setattr(campaign, field, value)
+
+    field_map = {
+        "name": "name",
+        "description": "description",
+        "status": "status",
+        "address": "address",
+        "center_latitude": "latitude",
+        "center_longitude": "longitude",
+        "start_date": "startDate",
+        "end_date": "endDate",
+    }
+    for key, attr in field_map.items():
+        if key in data:
+            setattr(campaign, attr, data[key])
+
+    if "status" in data:
+        campaign.isActive = str(data["status"]).upper() == "ACTIVE"
+
     campaign.updatedAt = datetime.utcnow()
     db.flush()
-    if brand_id is not None and campaign.brandId:
+    if brand_id is not _UNSET and campaign.brandId:
         _attach_brand_supervisors(db, campaign, user.id)
     db.commit()
     return _get_campaign_detail(campaign_id, db, user)
+
+
+@router.delete("/{campaign_id}")
+def delete_campaign(campaign_id: UUID, db: DbSession, user: ManagerUser):
+    campaign = _load_campaign_base(db, campaign_id)
+    if not campaign or campaign.organizationId != user.organizationId:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    db.delete(campaign)
+    db.commit()
+    return {"ok": True, "id": str(campaign_id)}
 
 
 @router.post("/{campaign_id}/executors", response_model=CampaignOut)

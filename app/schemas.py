@@ -190,6 +190,10 @@ class CampaignUpdate(BaseModel):
     status: str | None = None
     address: str | None = None
     brand_id: UUID | None = None
+    center_latitude: float | None = None
+    center_longitude: float | None = None
+    start_date: datetime | None = None
+    end_date: datetime | None = None
 
 
 class CampaignAssignExecutors(BaseModel):

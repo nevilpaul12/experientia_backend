@@ -237,20 +237,33 @@ def add_proof(task_id: UUID, payload: ProofImageCreate, db: DbSession, user: Cur
             detail=f"Invalid slot '{payload.slot}'. Expected: {', '.join(slots)}",
         )
 
+    is_manager = user_is_manager(db, user)
     meta = _meta(task)
     images = [img for img in (meta.get("images") or []) if isinstance(img, dict)]
     have = {img.get("slot") for img in images}
     idx = slots.index(payload.slot)
-    for prior in slots[:idx]:
-        if prior not in have:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Capture {slot_label(prior)} before {slot_label(payload.slot)}",
-            )
-    if payload.slot in have:
-        raise HTTPException(status_code=400, detail=f"{slot_label(payload.slot)} already uploaded")
 
-    if campaign.latitude is not None and campaign.longitude is not None:
+    # Executors must capture in order; managers may fill/replace any slot.
+    if not is_manager:
+        for prior in slots[:idx]:
+            if prior not in have:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Capture {slot_label(prior)} before {slot_label(payload.slot)}",
+                )
+        if payload.slot in have:
+            raise HTTPException(
+                status_code=400, detail=f"{slot_label(payload.slot)} already uploaded"
+            )
+    elif payload.slot in have:
+        images = [img for img in images if img.get("slot") != payload.slot]
+
+    # Managers may upload from the office — skip geofence enforcement.
+    if (
+        not is_manager
+        and campaign.latitude is not None
+        and campaign.longitude is not None
+    ):
         if not within_radius(
             campaign.latitude,
             campaign.longitude,
@@ -263,7 +276,10 @@ def add_proof(task_id: UUID, payload: ProofImageCreate, db: DbSession, user: Cur
             )
             raise HTTPException(
                 status_code=400,
-                detail=f"Photo is {dist:.2f} km from campaign center — must be within {DEFAULT_RADIUS_KM} km",
+                detail=(
+                    f"Photo is {dist:.2f} km from campaign center — "
+                    f"must be within {DEFAULT_RADIUS_KM} km"
+                ),
             )
 
     captured = (payload.captured_at or datetime.utcnow()).isoformat()
