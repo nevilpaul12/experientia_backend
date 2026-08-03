@@ -16,7 +16,7 @@ from app.serializers import task_out, resolve_sequence_number
 from app.media_rules import normalize_service_type
 from app.services.pdf import build_task_pdf
 from app.services.geo import within_radius, haversine_km
-from app.media_rules import slots_for, detail_form_for, slot_label, DEFAULT_RADIUS_KM, photos_for
+from app.media_rules import slots_for, detail_form_for, slot_label, photos_for, campaign_radius_km
 from app.services.storage import storage
 
 router = APIRouter(prefix="/api", tags=["tasks"])
@@ -271,16 +271,17 @@ def add_proof(task_id: UUID, payload: ProofImageCreate, db: DbSession, user: Cur
             campaign.longitude,
             payload.latitude,
             payload.longitude,
-            DEFAULT_RADIUS_KM,
+            campaign_radius_km(campaign),
         ):
             dist = haversine_km(
                 campaign.latitude, campaign.longitude, payload.latitude, payload.longitude
             )
+            radius = campaign_radius_km(campaign)
             raise HTTPException(
                 status_code=400,
                 detail=(
                     f"Photo is {dist:.2f} km from campaign center — "
-                    f"must be within {DEFAULT_RADIUS_KM} km"
+                    f"must be within {radius} km"
                 ),
             )
 

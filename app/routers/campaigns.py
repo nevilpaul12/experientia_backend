@@ -32,13 +32,14 @@ from app.models import (
 from app.schemas import (
     CampaignCreate,
     CampaignUpdate,
+    CampaignAddTasks,
     CampaignOut,
     CampaignListItem,
     CampaignAssignExecutors,
     CampaignAssignSupervisors,
 )
-from app.serializers import campaign_list_item_from_counts, campaign_out
-from app.media_rules import normalize_service_type, DEFAULT_RADIUS_KM
+from app.serializers import campaign_list_item_from_counts, campaign_out, resolve_sequence_number
+from app.media_rules import normalize_service_type, campaign_radius_km
 from app.services.geo import random_points_in_radius
 from app.services.pdf import build_campaign_pdf
 from app.services.pdf_jobs import start_export_job, get_job, list_campaign_jobs
@@ -230,6 +231,7 @@ def create_campaign(payload: CampaignCreate, db: DbSession, user: ManagerUser):
         serviceType=service,
         isActive=True,
         totalTasks=payload.total_tasks,
+        radiusKm=payload.radius_km,
         brandId=payload.brand_id,
         logo=brand.image if brand and brand.image else None,
         startDate=payload.start_date,
@@ -289,10 +291,11 @@ def _generate_tasks(db, campaign: Campaign, executors: list[User]) -> None:
     if campaign.latitude is None or campaign.longitude is None:
         raise HTTPException(status_code=400, detail="Campaign needs center coordinates")
 
+    radius = campaign_radius_km(campaign)
     points = random_points_in_radius(
         campaign.latitude,
         campaign.longitude,
-        DEFAULT_RADIUS_KM,
+        radius,
         campaign.totalTasks,
         seed=int(campaign.id.int % (2**31)),
     )
@@ -314,6 +317,89 @@ def _generate_tasks(db, campaign: Campaign, executors: list[User]) -> None:
                 flagged=False,
             )
         )
+
+
+def _campaign_executor_users(db, campaign_id: UUID) -> list[User]:
+    return (
+        db.query(User)
+        .join(CampaignMember, CampaignMember.userId == User.id)
+        .filter(
+            CampaignMember.campaignId == campaign_id,
+            CampaignMember.role == CampaignRole.EXECUTOR,
+            CampaignMember.active.is_(True),
+        )
+        .all()
+    )
+
+
+def _max_task_sequence(db, campaign_id: UUID) -> int:
+    tasks = db.query(Task).filter(Task.campaignId == campaign_id).all()
+    max_seq = 0
+    for t in tasks:
+        seq = resolve_sequence_number(t)
+        if seq > max_seq:
+            max_seq = seq
+    return max_seq
+
+
+def _add_campaign_tasks(
+    db,
+    campaign: Campaign,
+    count: int,
+    executor_user_id: UUID | None,
+    assigned_by: UUID,
+) -> None:
+    executors = _campaign_executor_users(db, campaign.id)
+    if not executors:
+        raise HTTPException(
+            status_code=400,
+            detail="Assign at least one executor to this campaign before adding tasks",
+        )
+
+    if executor_user_id:
+        executor = next((e for e in executors if e.id == executor_user_id), None)
+        if not executor:
+            raise HTTPException(status_code=400, detail="Executor is not assigned to this campaign")
+        assign_pool = [executor]
+    else:
+        assign_pool = executors
+
+    if campaign.latitude is None or campaign.longitude is None:
+        raise HTTPException(status_code=400, detail="Campaign needs center coordinates")
+
+    radius = campaign_radius_km(campaign)
+    start_seq = _max_task_sequence(db, campaign.id)
+    existing_count = db.query(Task).filter(Task.campaignId == campaign.id).count()
+    seed = int((campaign.id.int + existing_count + count) % (2**31))
+    points = random_points_in_radius(
+        campaign.latitude,
+        campaign.longitude,
+        radius,
+        count,
+        seed=seed,
+    )
+    now = datetime.utcnow()
+    for i, (lat, lng) in enumerate(points, start=1):
+        seq = start_seq + i
+        ex = assign_pool[(seq - 1) % len(assign_pool)]
+        db.add(
+            Task(
+                id=uuid4(),
+                campaignId=campaign.id,
+                executorUserId=ex.id,
+                status=TaskStatus.PENDING,
+                assignedAt=now,
+                metadata_={
+                    "sequenceNumber": seq,
+                    "target": {"latitude": lat, "longitude": lng},
+                    "images": [],
+                },
+                flagged=False,
+            )
+        )
+
+    campaign.totalTasks = int(campaign.totalTasks or 0) + count
+    campaign.updatedAt = datetime.utcnow()
 
 
 @router.get("/{campaign_id}", response_model=CampaignOut)
@@ -449,6 +535,7 @@ def update_campaign(
         "address": "address",
         "center_latitude": "latitude",
         "center_longitude": "longitude",
+        "radius_km": "radiusKm",
         "start_date": "startDate",
         "end_date": "endDate",
     }
@@ -475,6 +562,21 @@ def delete_campaign(campaign_id: UUID, db: DbSession, user: ManagerUser):
     db.delete(campaign)
     db.commit()
     return {"ok": True, "id": str(campaign_id)}
+
+
+@router.post("/{campaign_id}/tasks", response_model=CampaignOut)
+def add_campaign_tasks(
+    campaign_id: UUID,
+    payload: CampaignAddTasks,
+    db: DbSession,
+    user: ManagerUser,
+):
+    campaign = _load_campaign_base(db, campaign_id)
+    if not campaign or campaign.organizationId != user.organizationId:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    _add_campaign_tasks(db, campaign, payload.count, payload.executor_user_id, user.id)
+    db.commit()
+    return _get_campaign_detail(campaign_id, db, user)
 
 
 @router.post("/{campaign_id}/executors", response_model=CampaignOut)

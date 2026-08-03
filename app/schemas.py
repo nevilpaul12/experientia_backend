@@ -178,6 +178,7 @@ class CampaignCreate(BaseModel):
     address: str | None = None
     center_latitude: float
     center_longitude: float
+    radius_km: float = Field(default=3.0, ge=0.1, le=500)
     total_tasks: int = Field(ge=1, le=10000)
     executor_ids: list[UUID] = []
     start_date: datetime | None = None
@@ -192,8 +193,14 @@ class CampaignUpdate(BaseModel):
     brand_id: UUID | None = None
     center_latitude: float | None = None
     center_longitude: float | None = None
+    radius_km: float | None = Field(default=None, ge=0.1, le=500)
     start_date: datetime | None = None
     end_date: datetime | None = None
+
+
+class CampaignAddTasks(BaseModel):
+    count: int = Field(default=1, ge=1, le=500)
+    executor_user_id: UUID | None = None
 
 
 class CampaignAssignExecutors(BaseModel):

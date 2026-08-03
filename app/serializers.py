@@ -18,6 +18,7 @@ from app.media_rules import (
     detail_form_for,
     normalize_service_type,
     DEFAULT_RADIUS_KM,
+    campaign_radius_km,
 )
 from app.services.storage import storage
 from app.services.geo import within_radius
@@ -173,7 +174,7 @@ def task_out(task: Task, sequence_number: int = 0, image_limit: int | None = 1) 
             campaign.longitude,
             target_lat,
             target_lng,
-            DEFAULT_RADIUS_KM,
+            campaign_radius_km(campaign),
         )
 
     return TaskOut(
@@ -233,7 +234,7 @@ def campaign_list_item_from_counts(
         status=c.status,
         center_latitude=c.latitude,
         center_longitude=c.longitude,
-        radius_km=DEFAULT_RADIUS_KM,
+        radius_km=campaign_radius_km(c),
         address=c.address,
         total_tasks=c.totalTasks,
         created_at=c.createdAt,

@@ -64,6 +64,24 @@ def _ensure_brand_member_table() -> None:
 
 _ensure_brand_member_table()
 
+
+def _ensure_campaign_radius_column() -> None:
+    if get_settings().is_sqlite:
+        return
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    'ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "radiusKm" '
+                    'DOUBLE PRECISION NOT NULL DEFAULT 3.0'
+                )
+            )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[experientia] Campaign.radiusKm ensure skipped: {exc}")
+
+
+_ensure_campaign_radius_column()
+
 if settings.use_s3:
     storage.ensure_bucket_cors()
 

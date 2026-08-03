@@ -52,6 +52,18 @@ DETAIL_FORM: dict[str, str | None] = {
 DEFAULT_RADIUS_KM = 3.0
 
 
+def campaign_radius_km(campaign) -> float:
+    """Per-campaign geofence radius in km (falls back to default)."""
+    raw = getattr(campaign, "radiusKm", None)
+    if raw is None:
+        return DEFAULT_RADIUS_KM
+    try:
+        r = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_RADIUS_KM
+    return r if r > 0 else DEFAULT_RADIUS_KM
+
+
 def normalize_service_type(value: str | None) -> str:
     if not value:
         return "Other"

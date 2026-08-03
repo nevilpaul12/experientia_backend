@@ -128,6 +128,7 @@ class Campaign(Base):
     logo: Mapped[str | None] = mapped_column(Text, nullable=True)
     isActive: Mapped[bool] = mapped_column(Boolean, default=True)
     totalTasks: Mapped[int] = mapped_column(Integer, default=0)
+    radiusKm: Mapped[float] = mapped_column(Float, nullable=False, default=3.0)
     brandId: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("Brand.id"), nullable=True
     )
