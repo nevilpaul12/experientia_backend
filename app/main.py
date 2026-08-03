@@ -7,7 +7,7 @@ from sqlalchemy import text
 
 from app.config import get_settings
 from app.database import engine
-from app.routers import auth, users_brands, campaigns, tasks, uploads, exports
+from app.routers import auth, users_brands, campaigns, tasks, uploads, exports, geo
 from app.services.storage import storage
 
 settings = get_settings()
@@ -34,6 +34,7 @@ app.include_router(campaigns.router)
 app.include_router(tasks.router)
 app.include_router(uploads.router)
 app.include_router(exports.router)
+app.include_router(geo.router)
 
 
 def _ensure_brand_member_table() -> None:
